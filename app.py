@@ -5,7 +5,17 @@ import PyPDF2
 import io
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "http://localhost:3000"}})
+# Update CORS configuration to allow Vercel frontend
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:3000",
+            "https://image-to-excel-one.vercel.app"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 # Swagger configuration
 SWAGGER_URL = '/swagger'
