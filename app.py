@@ -5,8 +5,13 @@ import PyPDF2
 import tabula
 import os
 import tempfile
+import logging
 
 app = Flask(__name__)
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Update CORS configuration to allow Vercel frontend
 CORS(app, resources={
     r"/*": {
@@ -129,11 +134,12 @@ def extract_text():
             return jsonify({"error": "File must be a PDF"}), 400
 
         # Create a temporary file with a secure random name
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-            temp_path = temp_file.name
-            file.save(temp_path)
-        
+        temp_path = None
         try:
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                temp_path = temp_file.name
+                file.save(temp_path)
+            
             # Extract tables using tabula
             tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
             
@@ -161,15 +167,24 @@ def extract_text():
                 "tables": tables_json
             })
 
+        except Exception as e:
+            logger.error(f"Error processing PDF: {str(e)}")
+            raise
+            
         finally:
             # Clean up temporary file
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except Exception as e:
+                    logger.error(f"Error removing temporary file: {str(e)}")
 
     except Exception as e:
-        # Log the error for debugging
-        print(f"Error processing PDF: {str(e)}")
-        return jsonify({"error": "Failed to process PDF file"}), 500
+        logger.error(f"Error processing request: {str(e)}")
+        return jsonify({
+            "error": "Failed to process PDF file",
+            "details": str(e)
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
