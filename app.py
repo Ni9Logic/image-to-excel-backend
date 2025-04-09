@@ -3,9 +3,8 @@ from flask_cors import CORS
 from flask_swagger_ui import get_swaggerui_blueprint
 import PyPDF2
 import tabula
-import os
-import tempfile
 import logging
+import io
 
 app = Flask(__name__)
 # Configure logging
@@ -133,51 +132,31 @@ def extract_text():
         if not file.filename.endswith('.pdf'):
             return jsonify({"error": "File must be a PDF"}), 400
 
-        # Create a temporary file with a secure random name
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
-                temp_path = temp_file.name
-                file.save(temp_path)
+        # Read file into memory
+        file_content = file.read()
+        
+        # Extract tables using tabula with in-memory file
+        tables = tabula.read_pdf(io.BytesIO(file_content), pages='all', multiple_tables=True)
+        
+        # Convert tables to JSON-serializable format with headers
+        tables_json = []
+        for table in tables:
+            table_data = {
+                "headers": table.columns.tolist(),
+                "data": table.values.tolist()
+            }
+            tables_json.append(table_data)
             
-            # Extract tables using tabula
-            tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
-            
-            # Convert tables to JSON-serializable format with headers
-            tables_json = []
-            for table in tables:
-                table_data = {
-                    "headers": table.columns.tolist(),
-                    "data": table.values.tolist()
-                }
-                tables_json.append(table_data)
-                
-            # Read the file again for text extraction
-            with open(temp_path, 'rb') as pdf_file:
-                # Create PDF reader object
-                pdf_reader = PyPDF2.PdfReader(pdf_file)
-                
-                # Extract text from all pages
-                text = ""
-                for page in pdf_reader.pages:
-                    text += page.extract_text() + "\n"
-            
-            return jsonify({
-                "text": text,
-                "tables": tables_json
-            })
-
-        except Exception as e:
-            logger.error(f"Error processing PDF: {str(e)}")
-            raise
-            
-        finally:
-            # Clean up temporary file
-            if temp_path and os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except Exception as e:
-                    logger.error(f"Error removing temporary file: {str(e)}")
+        # Extract text using PyPDF2 with in-memory file
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        
+        return jsonify({
+            "text": text,
+            "tables": tables_json
+        })
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}")
