@@ -3,6 +3,8 @@ from flask_cors import CORS
 from flask_swagger_ui import get_swaggerui_blueprint
 import PyPDF2
 import tabula
+import os
+import tempfile
 
 app = Flask(__name__)
 # Update CORS configuration to allow Vercel frontend
@@ -126,42 +128,48 @@ def extract_text():
         if not file.filename.endswith('.pdf'):
             return jsonify({"error": "File must be a PDF"}), 400
 
-        # Save the file temporarily to process with tabula
-        temp_path = "temp.pdf"
-        file.save(temp_path)
+        # Create a temporary file with a secure random name
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+            temp_path = temp_file.name
+            file.save(temp_path)
         
-        # Extract tables using tabula
-        tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
-        
-        # Convert tables to JSON-serializable format with headers
-        tables_json = []
-        for table in tables:
-            table_data = {
-                "headers": table.columns.tolist(),
-                "data": table.values.tolist()
-            }
-            tables_json.append(table_data)
+        try:
+            # Extract tables using tabula
+            tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
             
-        # Read the file again for text extraction
-        with open(temp_path, 'rb') as pdf_file:
-            # Create PDF reader object
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            # Convert tables to JSON-serializable format with headers
+            tables_json = []
+            for table in tables:
+                table_data = {
+                    "headers": table.columns.tolist(),
+                    "data": table.values.tolist()
+                }
+                tables_json.append(table_data)
+                
+            # Read the file again for text extraction
+            with open(temp_path, 'rb') as pdf_file:
+                # Create PDF reader object
+                pdf_reader = PyPDF2.PdfReader(pdf_file)
+                
+                # Extract text from all pages
+                text = ""
+                for page in pdf_reader.pages:
+                    text += page.extract_text() + "\n"
             
-            # Extract text from all pages
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        
-        # Clean up temporary file
-        import os
-        os.remove(temp_path)
-        
-        return jsonify({
-            "text": text,
-            "tables": tables_json
-        })
+            return jsonify({
+                "text": text,
+                "tables": tables_json
+            })
+
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # Log the error for debugging
+        print(f"Error processing PDF: {str(e)}")
+        return jsonify({"error": "Failed to process PDF file"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
