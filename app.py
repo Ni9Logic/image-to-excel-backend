@@ -3,6 +3,8 @@ from flask_cors import CORS
 from flask_swagger_ui import get_swaggerui_blueprint
 import PyPDF2
 import io
+import tabula
+import pandas as pd
 
 app = Flask(__name__)
 # Update CORS configuration to allow Vercel frontend
@@ -78,7 +80,7 @@ def health_check():
 @app.route('/extract-text', methods=['POST'])
 def extract_text():
     """
-    Extract text from PDF file
+    Extract text and tables from PDF file
     ---
     tags:
       - PDF Operations
@@ -87,15 +89,19 @@ def extract_text():
         name: file
         type: file
         required: true
-        description: PDF file to extract text from
+        description: PDF file to extract text and tables from
     responses:
       200:
-        description: Successfully extracted text
+        description: Successfully extracted text and tables
         schema:
           type: object
           properties:
             text:
               type: string
+            tables:
+              type: array
+              items:
+                type: array
       400:
         description: Bad request
         schema:
@@ -122,19 +128,40 @@ def extract_text():
         if not file.filename.endswith('.pdf'):
             return jsonify({"error": "File must be a PDF"}), 400
 
-        # Read the uploaded file
-        content = file.read()
-        pdf_file = io.BytesIO(content)
+        # Save the file temporarily to process with tabula
+        temp_path = "temp.pdf"
+        file.save(temp_path)
         
-        # Create PDF reader object
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        # Extract tables using tabula
+        tables = tabula.read_pdf(temp_path, pages='all', multiple_tables=True)
         
-        # Extract text from all pages
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text() + "\n"
+        # Convert tables to JSON-serializable format with headers
+        tables_json = []
+        for table in tables:
+            table_data = {
+                "headers": table.columns.tolist(),
+                "data": table.values.tolist()
+            }
+            tables_json.append(table_data)
+            
+        # Read the file again for text extraction
+        with open(temp_path, 'rb') as pdf_file:
+            # Create PDF reader object
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            
+            # Extract text from all pages
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
         
-        return jsonify({"text": text})
+        # Clean up temporary file
+        import os
+        os.remove(temp_path)
+        
+        return jsonify({
+            "text": text,
+            "tables": tables_json
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
