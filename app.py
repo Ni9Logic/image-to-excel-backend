@@ -2,9 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_swagger_ui import get_swaggerui_blueprint
 import PyPDF2
-import io
 import tabula
-import pandas as pd
 
 app = Flask(__name__)
 # Update CORS configuration to allow Vercel frontend
